@@ -180,9 +180,17 @@ The containers run as root, so files they create in `data/` (calibration, datase
 by root on the host. Everything works, but moving or deleting them needs `sudo`
 (or `sudo chown -R $USER: data logs`).
 
-**Linux without Docker** works too: `scripts/setup_native.sh` (needs `uv`, and `ffmpeg` 4–8 from your
-distribution, e.g. `sudo apt install ffmpeg`), then follow the steps exactly as on macOS. Add yourself to
-the `dialout` group for the serial ports (§11).
+**Linux without Docker** works too, with the same `.venv` as on macOS (Ubuntu/Debian commands):
+```bash
+sudo apt install ffmpeg build-essential linux-libc-dev   # ffmpeg 4–8; a C compiler builds evdev (recording keys)
+curl -LsSf https://astral.sh/uv/install.sh | sh          # installs uv, then open a new terminal
+sudo usermod -aG dialout $USER                           # serial-port access; log out and in again
+scripts/setup_native.sh                                  # creates .venv with Python 3.12 + requirements/pc.txt
+scripts/00_check.sh                                      # expect "CPU only" (or CUDA if the PC has an NVIDIA GPU)
+```
+Then follow the steps exactly as on macOS, including `01_find_port.sh` and `04_find_cameras.sh`. Scripts
+activate `.venv` themselves; to use the LeRobot CLI by hand: `source .venv/bin/activate`. PyPI's Linux
+torch is a CUDA build (a few GB to download); it runs fine on a PC without a GPU.
 
 ---
 
