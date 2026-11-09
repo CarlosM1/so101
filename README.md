@@ -91,7 +91,7 @@ scripts/                ← one script per step, numbered in order. Each prints 
                           lerobot command before running it, so you learn the CLI.
 scripts/robot_client.py ← launcher for LeRobot's async robot client, with two fixes (§10)
 data/                   ← (created) calibration files + datasets + HF cache. Back it up!
-scripts/logs/, logs/    ← (created) LeRobot debug logs of every run; useful for diagnosing, not committed
+logs/                   ← (created) LeRobot debug logs, in the folder you ran the script from; not committed
 ```
 
 Where things are stored (set by `HF_LEROBOT_HOME` in `.env`):
@@ -140,22 +140,56 @@ macOS may ask for **camera** permission for your terminal, and for **Accessibili
 (keyboard shortcuts while recording). Grant both in System Settings → Privacy & Security.
 
 ### Linux (Docker)
-```bash
-docker compose -f compose.pc.yml build
-docker compose -f compose.pc.yml --profile robot run --rm robot scripts/00_check.sh
-```
-Make the arm ports stable first (otherwise `ttyACM0`/`ttyACM1` can swap on reboot): follow
-`docker/udev/99-so101.rules`, then set `FOLLOWER_PORT=/dev/so101_follower`, `LEADER_PORT=/dev/so101_leader`.
-Find ports with `ls /dev/serial/by-id/` on the host, since a container only sees the devices passed to it.
+Install Docker Engine with the Compose plugin, and let your user run it: `sudo usermod -aG docker $USER`,
+then log out and in again.
+
+**Do the hardware steps on the host first.** The `robot` container is started with the arm ports from
+`.env` passed in, and Docker refuses to start it while those devices don't exist (the defaults in
+`.env.example` are macOS placeholders). For the same reason `01_find_port.sh` and `04_find_cameras.sh`
+can't discover anything from inside a container.
+
+1. **Arm ports.** Plug in both arms (powered), then on the host:
+   ```bash
+   ls -l /dev/serial/by-id/       # one entry per arm, e.g. usb-1a86_USB_Single_Serial_5A7C121717-if00 -> ../../ttyACM0
+   ```
+   Unplug one arm and list again to see which is which. Then either make the names stable (recommended,
+   otherwise `ttyACM0`/`ttyACM1` can swap on reboot): follow `docker/udev/99-so101.rules` and set
+   `FOLLOWER_PORT=/dev/so101_follower`, `LEADER_PORT=/dev/so101_leader`; or set `FOLLOWER_PORT`/`LEADER_PORT`
+   to the `/dev/ttyACM*` names you saw.
+2. **Cameras.** On the host:
+   ```bash
+   sudo apt install v4l-utils     # if missing
+   v4l2-ctl --list-devices        # each camera lists its /dev/video* nodes
+   ```
+   Many USB cameras create **two** nodes (e.g. `/dev/video0` and `/dev/video1`); the first one of each
+   camera is the image stream. So two cameras are often `0` and `2`, not `0` and `1`. Put the numbers in
+   `CAM1_DEVICE` (front/top) and `CAM2_DEVICE` (wrist), then check the views in §6 with
+   `05b_camera_snapshot.sh`.
+3. **Build and check:**
+   ```bash
+   docker compose -f compose.pc.yml build
+   docker compose -f compose.pc.yml --profile robot run --rm robot scripts/00_check.sh
+   ```
 
 In the steps below, a command like `scripts/03_calibrate.sh follower` becomes, on Linux Docker:
-`docker compose -f compose.pc.yml --profile robot run --rm robot scripts/03_calibrate.sh follower`
+`docker compose -f compose.pc.yml --profile robot run --rm robot scripts/03_calibrate.sh follower`.
+Skip `01_find_port.sh` and `04_find_cameras.sh` (done above), and start the camera server with
+`docker compose -f compose.pc.yml up -d camera-server` instead of `05_camera_server.sh`.
+
+The containers run as root, so files they create in `data/` (calibration, datasets) and `logs/` are owned
+by root on the host. Everything works, but moving or deleting them needs `sudo`
+(or `sudo chown -R $USER: data logs`).
+
+**Linux without Docker** works too: `scripts/setup_native.sh` (needs `uv`, and `ffmpeg` 4–8 from your
+distribution, e.g. `sudo apt install ffmpeg`), then follow the steps exactly as on macOS. Add yourself to
+the `dialout` group for the serial ports (§11).
 
 ---
 
 ## 5. Arms: ports → motor IDs → calibration
 
-**5.1 Find the ports** (macOS / Linux-native). Run once per arm; it asks you to unplug its USB cable:
+**5.1 Find the ports** (macOS / Linux without Docker; Linux Docker: done in §4). Run once per arm;
+it asks you to unplug its USB cable:
 ```bash
 scripts/01_find_port.sh          # → e.g. /dev/tty.usbmodem585A0076841
 ```
@@ -193,6 +227,8 @@ recorded with; the default ACT policy uses degrees.
 ---
 
 ## 6. Cameras: find → serve → check
+
+Linux Docker: already done in §4, continue at "Start the server".
 
 ```bash
 scripts/04_find_cameras.sh       # lists OpenCV indices, saves a test image per camera to outputs/captured_images
@@ -418,7 +454,8 @@ actions whose time has passed are skipped, overlapping steps are blended (`AGGRE
    dropped, and `max_jump`, the largest disagreement (degrees) between the old and new plan. Big jumps
    mean the policy keeps changing its mind, typical in a scene unlike its training data.
 
-Every run writes a full debug log to `scripts/logs/robot_client_<time>.log`. Its `Control loop (ms)` lines
+Every run writes a full debug log to `logs/robot_client_<time>.log`, inside the folder you ran the
+script from (`scripts/logs/` if you run `./11_robot_client.sh` from `scripts/`). Its `Control loop (ms)` lines
 should stay well under 33 ms.
 
 Tuning:
