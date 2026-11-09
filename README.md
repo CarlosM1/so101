@@ -241,15 +241,28 @@ camera and `CAM2_DEVICE` to the ID of the wrist camera in `.env`. On a MacBook, 
 gets an ID (often 0 or 1). Make sure you don't pick it by mistake.
 Indices can change when you re-plug cameras, so check again if the views look swapped.
 
-Start the server in its **own terminal** and leave it running:
+**macOS / Linux without Docker:** start the server in its **own terminal** and leave it running:
 ```bash
 scripts/05_camera_server.sh      # logs "capture rates: <CAM1_NAME>=30.0fps <CAM2_NAME>=30.0fps" every 5 s
-# Linux Docker:  docker compose -f compose.pc.yml up -d camera-server
 ```
+
+**Linux Docker:** the camera server has its **own service**, `camera-server`, the only container that
+gets the cameras (`/dev/video${CAM1_DEVICE}`, `/dev/video${CAM2_DEVICE}`). Don't run
+`05_camera_server.sh` in the `robot` container: it has no cameras and fails with
+`can't open camera by index`.
+```bash
+docker compose -f compose.pc.yml up -d camera-server        # runs in the background, restarts by itself
+docker compose -f compose.pc.yml logs -f camera-server      # wait for "capture rates: front=30.0fps wrist=30.0fps"; Ctrl+C stops watching
+docker compose -f compose.pc.yml up -d camera-server        # run again after changing CAM*_DEVICE or other camera settings in .env
+docker compose -f compose.pc.yml stop camera-server         # stop it
+```
+
 Check what LeRobot will actually receive:
 ```bash
 scripts/05b_camera_snapshot.sh   # writes snapshots/<CAM1_NAME>.jpg and snapshots/<CAM2_NAME>.jpg
+# Linux Docker:  docker compose -f compose.pc.yml --profile robot run --rm robot scripts/05b_camera_snapshot.sh
 ```
+If the two views are swapped, swap `CAM1_DEVICE` and `CAM2_DEVICE` in `.env` and restart the server.
 No cameras yet? Test the whole pipeline with synthetic ones:
 `python camera_server/serve.py --camera camera1=test:red:5555 --camera camera2=test:blue:5556`.
 
