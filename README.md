@@ -194,7 +194,9 @@ torch is a CUDA build (a few GB to download); it runs fine on a PC without a GPU
 
 ---
 
-## 5. Arms: ports → motor IDs → calibration
+## 5. Arms: ports → calibration
+
+The arms come with their motor IDs already set, so there's no motor setup to do.
 
 **5.1 Find the ports** (macOS / Linux without Docker; Linux Docker: done in §4). Run once per arm;
 it asks you to unplug its USB cable:
@@ -203,14 +205,7 @@ scripts/01_find_port.sh          # → e.g. /dev/tty.usbmodem585A0076841
 ```
 Put the results into `FOLLOWER_PORT` / `LEADER_PORT` in `.env`. The follower is the arm with a gripper. The leader is the arm with the handle.
 
-**5.2 Set motor IDs (once per arm, ever).** New servos all have ID 1, so each one must get a unique ID
-(gripper=6 … shoulder_pan=1). Connect **one motor at a time** when prompted:
-```bash
-scripts/02_setup_motors.sh follower
-scripts/02_setup_motors.sh leader
-```
-
-**5.3 Calibrate.** Move every joint to the middle of its range, press Enter, then sweep each joint through
+**5.2 Calibrate.** Move every joint to the middle of its range, press Enter, then sweep each joint through
 its full range. Calibration maps raw encoder ticks to the same joint positions on both arms. That shared
 mapping is what makes the follower mirror the leader, and what makes your data reusable.
 ```bash
@@ -390,7 +385,7 @@ The default in `.env.example` is
 `front` + `wrist` at 640×480, 40 demonstrations, joints in degrees (its author doesn't state the unit; its
 saved joint statistics go past ±100, which the −100…100 mode can't produce). Its
 [code repository](https://github.com/zbylink/SO101-ACT-Pick-and-Place) has a video of the setup it was
-trained in: copy its front camera placement and wrist orientation (§5.3).
+trained in: copy its front camera placement and wrist orientation (§5.2).
 
 To pick another one, search the Hub for models trained on an SO101 (SO100 also works, since the arms
 share the same joints):
@@ -403,7 +398,7 @@ https://huggingface.co/models?other=lerobot. Open a candidate's `config.json` an
 | the image `shape` (e.g. `[3, 480, 640]`) | your camera resolution | `CAMERA_WIDTH`, `CAMERA_HEIGHT` |
 | `observation.state` / `action` shape `[6]` | the SO101's 6 joints | nothing; anything else is not an SO101 policy |
 | files `policy_preprocessor.json` / `policy_postprocessor.json` | present = LeRobot ≥ 0.4 format | nothing; without them it's an old-format model that LeRobot 0.6.1 can't load directly. Skip it |
-| joint units (not in `config.json`) | degrees or −100…100 | `USE_DEGREES` (§5.3) |
+| joint units (not in `config.json`) | degrees or −100…100 | `USE_DEGREES` (§5.2) |
 
 Then set `POLICY_PATH` to the model's Hub id (e.g. `some-user/smolvla_so101_pick_place`). For a VLA, also
 set `TASK` to the instruction it was trained on; it's usually on the model card or in its dataset.
@@ -472,7 +467,7 @@ Tuning:
 | Arm pauses between chunks (queue runs empty) | raise `CHUNK_SIZE_THRESHOLD` (0.6–0.7) or `ACTIONS_PER_CHUNK` |
 | Arm reacts late / overshoots | lower `ACTIONS_PER_CHUNK` |
 | Arm hesitates / goes back to earlier positions | check `DEBUG_QUEUE=1` for big `max_jump`; try `AGGREGATE_FN=average` or `conservative`. Usually the policy is outside its training scene: rebuild its scene, or record your own data and fine-tune |
-| Gripper turns sideways / wrong rotation at start | `wrist_roll` zero differs from the policy's: recalibrate (§5.3) |
+| Gripper turns sideways / wrong rotation at start | `wrist_roll` zero differs from the policy's: recalibrate (§5.2) |
 | Arm jumps to a pose when inference starts | the first chunk starts from the policy's training start pose. Move the arm close to that pose before starting |
 | Connection refused | server running? `SPARK_HOST`/`POLICY_SERVER_PORT` right? Test with `nc -z <SPARK_HOST> 8090`. Refused right after a previous session: the server is restarting, wait a few seconds and retry. Firewall: `sudo ufw allow 8090/tcp` on the Spark |
 
@@ -494,7 +489,7 @@ for this on a laptop.
 | Problem | Cause / fix |
 |---|---|
 | `Permission denied: /dev/ttyACM0` (Linux) | `sudo usermod -aG dialout $USER` and re-login, or the udev rule's `MODE="0666"` |
-| Motor not found / wrong ID | motor IDs not set (step 5.2), loose daisy-chain cable, or the arm's power supply is off |
+| Motor not found / wrong ID | loose daisy-chain cable, or the arm's power supply is off |
 | Follower moves differently from leader | re-calibrate both; check `FOLLOWER_ID`/`LEADER_ID` didn't change |
 | `ZMQCamera … timeout` | camera server not running, or wrong `CAMERA_SERVER_HOST`/ports |
 | Views swapped | camera indices changed; re-run step 6 and look at `snapshots/` |
