@@ -1,0 +1,10 @@
+# Personal computer: arms, cameras, recording, robot client.
+# No policy runs here in the default setup, so no CUDA and no VLA extras.
+#   feetech      -> Feetech STS3215 servo SDK (SO101 motors)
+#   core_scripts -> lerobot-record/replay/teleoperate/calibrate + dataset + rerun viz
+#   async        -> gRPC client for the Spark policy server
+#   pyzmq-dep    -> ZMQ, for the camera server and ZMQ cameras
+lerobot[feetech,core_scripts,async,pyzmq-dep]==0.6.1
+torch==2.11.*
+torchvision==0.26.*
+torchcodec==0.11.*

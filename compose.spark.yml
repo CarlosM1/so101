@@ -1,0 +1,38 @@
+# Spark stack (NVIDIA DGX Spark).
+#   docker compose -f compose.spark.yml build
+#   docker compose -f compose.spark.yml up -d policy-server
+#   docker compose -f compose.spark.yml run --rm train
+x-common: &common
+  image: so101-spark:lerobot-0.6.1
+  build: { context: ., dockerfile: docker/spark.Dockerfile }
+  network_mode: host          # exposes POLICY_SERVER_PORT directly on the Spark's LAN IP
+  ipc: host                   # big shared memory for DataLoader workers
+  working_dir: /workspace
+  volumes:
+    - .:/workspace            # code, .env, data/ (HF cache: datasets + models), outputs/ (checkpoints)
+  ulimits:
+    memlock: -1
+    stack: 67108864
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - { driver: nvidia, count: all, capabilities: [gpu] }
+
+services:
+  policy-server:
+    <<: *common
+    command: scripts/10_policy_server.sh
+    restart: unless-stopped
+
+  train:
+    <<: *common
+    profiles: [train]
+    command: scripts/09_train.sh
+
+  shell:
+    <<: *common
+    profiles: [tools]
+    stdin_open: true
+    tty: true
+    command: bash

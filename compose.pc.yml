@@ -1,0 +1,33 @@
+# PC stack (LINUX host). On macOS use the native scripts instead — see README.
+#   docker compose -f compose.pc.yml build
+#   docker compose -f compose.pc.yml up -d camera-server
+#   docker compose -f compose.pc.yml run --rm robot scripts/07_record.sh
+# Values like ${FOLLOWER_PORT} come from ./.env (compose reads it automatically).
+x-common: &common
+  image: so101-pc:lerobot-0.6.1
+  build: { context: ., dockerfile: docker/pc.Dockerfile }
+  network_mode: host          # camera server on 127.0.0.1, Spark reachable on the LAN
+  working_dir: /workspace
+  volumes:
+    - .:/workspace            # code, .env, data/ (calibration + datasets) live on the host
+
+services:
+  # The ONLY container that touches the cameras. Everything else subscribes over ZMQ.
+  camera-server:
+    <<: *common
+    command: scripts/05_camera_server.sh
+    restart: unless-stopped
+    devices:
+      - /dev/video${CAM1_DEVICE}:/dev/video${CAM1_DEVICE}
+      - /dev/video${CAM2_DEVICE}:/dev/video${CAM2_DEVICE}
+
+  # Interactive box with both arms: setup-motors, calibrate, teleop, record, replay, robot client.
+  robot:
+    <<: *common
+    profiles: [robot]
+    stdin_open: true          # recording keys (→ ← Esc) are read from this TTY
+    tty: true
+    command: bash
+    devices:
+      - ${FOLLOWER_PORT}:${FOLLOWER_PORT}
+      - ${LEADER_PORT}:${LEADER_PORT}

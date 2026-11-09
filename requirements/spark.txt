@@ -1,0 +1,9 @@
+# DGX Spark (aarch64 + GB10 GPU): training and the policy server.
+#   training -> lerobot-train + datasets + trackio + accelerate
+#   smolvla  -> SmolVLA (transformers); add `pi` here if you want pi0/pi0.5
+#   async    -> gRPC policy server
+# torch 2.11 is the floor for aarch64 torchcodec wheels and lerobot 0.6.1 caps torch <2.12.
+lerobot[training,smolvla,async]==0.6.1
+torch==2.11.*
+torchvision==0.26.*
+torchcodec==0.11.*

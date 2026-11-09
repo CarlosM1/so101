@@ -218,3 +218,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- SO101 project ----
+# secrets: each person creates their own from .env.example
+.env
+# local Python env (scripts/setup_native.sh recreates it)
+.venv/
+# calibration files, recorded datasets, Hugging Face cache, checkpoints, camera snapshots
+data/
+outputs/
+snapshots/
+# LeRobot run logs (scripts/logs/ on the PC, logs/ written by the policy server on the Spark)
+logs/
+__pycache__/
+.DS_Store
