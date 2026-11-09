@@ -53,7 +53,8 @@ published on the Hub (§9). The default is an ACT pick-and-place policy
 ACT policy can also run on the Mac itself, with no Spark (§10).
 
 **The Spark is shared.** Several people use it, so the project runs under a dedicated `academy` user
-(§9.1), and the policy server listens on port **8090** (8080 is already taken by another user's service).
+(§9.1), and the policy server listens on port **8090** (8080, LeRobot's default, is a popular port that other services on a shared
+machine often already use).
 Students never log in to the Spark: they only run the robot client on their own PC.
 
 ### macOS and Docker: read this first
@@ -108,8 +109,8 @@ Where things are stored (set by `HF_LEROBOT_HOME` in `.env`):
 2. **Hugging Face account and token** with *write* access: https://huggingface.co/settings/tokens.
    Recorded datasets are uploaded to the Hub, and the Spark downloads the pretrained policy from it.
    `HF_USER` must be your exact Hub username (see your profile URL).
-3. **Network**: PC and Spark on the same LAN. The Academy's Spark is at `192.168.10.6` (already the
-   default in `.env.example`); elsewhere, find it with `hostname -I` on the Spark.
+3. **Network**: PC and Spark on the same LAN. Find the Spark's IP with `hostname -I` on the Spark and put
+   it in `SPARK_HOST` (`.env.example` already holds the Academy's). Below, `<SPARK_HOST>` means that IP.
 4. **Cameras**: two USB cameras. **CAM1** is a fixed front/top view; **CAM2** is on the wrist.
 5. Create your config:
    ```bash
@@ -301,7 +302,7 @@ is for whoever administers the Spark.
 The Spark is shared, so the project lives under its own user. Nobody logs in as `academy`: you switch to
 it from your admin account.
 ```bash
-ssh <admin>@192.168.10.6
+ssh <admin>@<SPARK_HOST>
 sudo adduser academy                    # lowercase: Ubuntu rejects capitals. Optional fields: just Enter
 sudo usermod -aG docker academy         # lets it run Docker (note: the docker group is root-equivalent)
 echo "DenyUsers academy" | sudo tee /etc/ssh/sshd_config.d/deny-academy.conf
@@ -319,7 +320,7 @@ git clone <repository URL> ~/SO101
 
 # option B, from the PC folder, then move it on the Spark
 rsync -av --exclude data --exclude .venv --exclude outputs --exclude snapshots --exclude 'logs' \
-  ./ <admin>@192.168.10.6:~/SO101/
+  ./ <admin>@<SPARK_HOST>:~/SO101/
 #   on the Spark, as <admin>:
 sudo cp -r ~/SO101 /home/academy/ && sudo chown -R academy:academy /home/academy/SO101 && rm -rf ~/SO101
 ```
@@ -386,7 +387,7 @@ by itself.
 **On the PC** (camera server running), these `.env` values must match the Spark and the policy. They're
 the defaults in `.env.example`:
 ```bash
-SPARK_HOST=192.168.10.6
+SPARK_HOST=<the Spark's IP>                    # the Academy's is already in .env.example
 POLICY_SERVER_PORT=8090
 POLICY_TYPE=act
 POLICY_PATH=BoyuZhao/so101-act-pick-and-place   # the Hub id you picked in §9
@@ -428,10 +429,10 @@ Tuning:
 | Arm hesitates / goes back to earlier positions | check `DEBUG_QUEUE=1` for big `max_jump`; try `AGGREGATE_FN=average` or `conservative`. Usually the policy is outside its training scene: rebuild its scene, or record your own data and fine-tune |
 | Gripper turns sideways / wrong rotation at start | `wrist_roll` zero differs from the policy's: recalibrate (§5.3) |
 | Arm jumps to a pose when inference starts | the first chunk starts from the policy's training start pose. Move the arm close to that pose before starting |
-| Connection refused | server running? `SPARK_HOST`/`POLICY_SERVER_PORT` right? Test with `nc -z 192.168.10.6 8090`. Refused right after a previous session: the server is restarting, wait a few seconds and retry. Firewall: `sudo ufw allow 8090/tcp` on the Spark |
+| Connection refused | server running? `SPARK_HOST`/`POLICY_SERVER_PORT` right? Test with `nc -z <SPARK_HOST> 8090`. Refused right after a previous session: the server is restarting, wait a few seconds and retry. Firewall: `sudo ufw allow 8090/tcp` on the Spark |
 
 A wired Ethernet connection (PC and Spark on the same router or switch) makes new chunks arrive sooner
-than over Wi-Fi. Check which link the PC actually uses with `route get 192.168.10.6 | grep interface`
+than over Wi-Fi. Check which link the PC actually uses with `route get <SPARK_HOST> | grep interface`
 (on a MacBook Air, `en0` is Wi-Fi).
 
 **Safety:** the first runs of any new policy can move fast and unexpectedly. Keep the workspace clear and
@@ -458,7 +459,7 @@ for this on a laptop.
 | Episodes shorter than your session | `EPISODE_TIME_S` cuts the recording into episodes (§8) |
 | Recording keys don't work (macOS) | grant Accessibility / Input Monitoring to your terminal; keep the terminal focused |
 | torchcodec `libnppicc.so.13` / `libnvrtc` errors in a custom image | aarch64 torchcodec is a CUDA build: install `nvidia-npp==13.0.*` and set `LD_LIBRARY_PATH` as in the Dockerfiles |
-| Policy server keeps `Restarting`, log says `Address already in use` | another program uses the port. Find it with `sudo ss -ltnp \| grep :<port>` (on the Academy Spark, 8080 is another user's code-server). Change `POLICY_SERVER_PORT` in the **Spark's** `/home/academy/SO101/.env`, then `docker compose -f compose.spark.yml restart policy-server`, and use the same port on every PC |
+| Policy server keeps `Restarting`, log says `Address already in use` | another program uses the port. Find it with `sudo ss -ltnp \| grep :<port>` (on a shared machine, 8080 is often taken). Change `POLICY_SERVER_PORT` in the **Spark's** `/home/academy/SO101/.env`, then `docker compose -f compose.spark.yml restart policy-server`, and use the same port on every PC |
 | `Couldn't find a choice class for 'zmq'` | you ran LeRobot's robot client directly; use `scripts/11_robot_client.sh` (§10) |
 | `adduser: Please enter a username matching …` | Linux usernames must be lowercase: `academy`, not `ACADEMY` |
 | `sudo: a terminal is required to read the password` during `rsync --rsync-path="sudo …"` | copy to your own home first, then `sudo cp` as in §9.2 |
@@ -485,3 +486,10 @@ Tested on the real setup (MacBook Air on Wi-Fi + Academy DGX Spark, `academy` us
 
 Not yet verified by someone following this guide from scratch: the PC setup (§4) on a fresh machine, and
 the Spark setup (§9.1–9.2) by a new user.
+
+---
+
+## License
+
+Apache License 2.0 (see [LICENSE](LICENSE)), the same license as [LeRobot](https://github.com/huggingface/lerobot),
+which this project builds on. Pretrained policies and datasets from the Hugging Face Hub keep their own licenses.
