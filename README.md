@@ -2,7 +2,9 @@
 
 A hands-on setup for the [LeRobot SO101 guide](https://huggingface.co/docs/lerobot/main/en/so101). You
 teleoperate the arm, record demonstrations, and run a **pretrained policy downloaded from the Hugging Face
-Hub** on the real arm. Training is out of scope. The work is split across two machines:
+Hub** on the real arm. For now, Training is out of scope. The work is split across two machines, PC and Spark:
+
+**What runs on each machine**
 
 | Runs on the **PC** (your computer) | Runs on the **Spark** |
 |---|---|
@@ -52,10 +54,9 @@ published on the Hub (§9). The default is an ACT pick-and-place policy
 ([`BoyuZhao/so101-act-pick-and-place`](https://huggingface.co/BoyuZhao/so101-act-pick-and-place)). A small
 ACT policy can also run on the Mac itself, with no Spark (§10).
 
-**The Spark is shared.** Several people use it, so the project runs under a dedicated `academy` user
-(§9.1), and the policy server listens on port **8090** (8080, LeRobot's default, is a popular port that other services on a shared
-machine often already use).
-Students never log in to the Spark: they only run the robot client on their own PC.
+**The Spark is shared and already set up.** Students never log in to it: they only run the robot client
+on their own PC. Its policy server listens on port **8090** (LeRobot's default, 8080, is often already
+taken on a shared machine). Setting the Spark up is in [SPARK_ADMIN.md](SPARK_ADMIN.md), for its admins.
 
 ### One guide for macOS and Linux
 
@@ -64,8 +65,8 @@ environment (`.venv`, created by `scripts/setup_native.sh`) with pinned package 
 same `scripts/` with the same `.env`. Only the installation (§4), the port names (§5.1) and the camera
 numbers (§6) differ, and those places say so. Docker is used **only on the Spark**.
 
-(A Linux PC *can* also run the PC side in Docker, see [Appendix A](#appendix-a-linux-pc-with-docker-optional).
-It's optional and adds extra steps. On macOS it isn't possible at all: Docker Desktop runs containers in a
+(A Linux PC *can* also run the PC side in Docker, see [Appendix A](#appendix-a-linux-pc-with-docker).
+It adds extra steps, but it will always work. On macOS it isn't possible at all: Docker Desktop runs containers in a
 VM that can't see the Mac's USB arms and cameras.)
 
 ---
@@ -73,6 +74,7 @@ VM that can't see the Mac's USB arms and cameras.)
 ## 2. Project layout
 
 ```
+README.md / SPARK_ADMIN.md ← this guide (PC side) / setting up the Spark (admins only)
 .env.example            ← all configuration (ports, IDs, cameras, task, Spark IP). Copy to .env
 requirements/pc.txt     ← PC packages:    lerobot[feetech,core_scripts,async,pyzmq-dep]
 requirements/spark.txt  ← Spark packages: lerobot[training,smolvla,async] (policy server)
@@ -107,7 +109,7 @@ Where things are stored (set by `HF_LEROBOT_HOME` in `.env`):
    `HF_USER` must be your exact Hub username (see your profile URL).
 3. **Network**: PC and Spark on the same LAN. Find the Spark's IP with `hostname -I` on the Spark and put
    it in `SPARK_HOST` (`.env.example` already holds the Academy's). Below, `<SPARK_HOST>` means that IP.
-4. **Cameras**: two USB cameras. **CAM1** is a fixed front/top view; **CAM2** is on the wrist.
+4. **Cameras**: two USB cameras. **CAM1** is a fixed front/top view, can be the PC's camera; **CAM2** is on the wrist of the gripper/follower arm.
 5. Create your config:
    ```bash
    cp .env.example .env     # then edit: HF_USER, HF_TOKEN, FOLLOWER_PORT, LEADER_PORT …
@@ -299,54 +301,12 @@ browse the dataset at https://huggingface.co/spaces/lerobot/visualize_dataset (e
 
 ---
 
-## 9. Spark setup and choosing a pretrained policy
+## 9. Choosing a pretrained policy
 
-**Students skip §9.1–9.2:** the Academy's Spark is already set up and its policy server is running. This
-is for whoever administers the Spark.
+The Academy's Spark is already set up and its policy server is running: you only need its address
+(`SPARK_HOST`, already in `.env.example`). Setting up the Spark is covered in [SPARK_ADMIN.md](SPARK_ADMIN.md),
+for its administrators.
 
-### 9.1 A dedicated `academy` user (one time, as an admin)
-The Spark is shared, so the project lives under its own user. Nobody logs in as `academy`: you switch to
-it from your admin account.
-```bash
-ssh <admin>@<SPARK_HOST>
-sudo adduser academy                    # lowercase: Ubuntu rejects capitals. Optional fields: just Enter
-sudo usermod -aG docker academy         # lets it run Docker (note: the docker group is root-equivalent)
-echo "DenyUsers academy" | sudo tee /etc/ssh/sshd_config.d/deny-academy.conf
-sudo systemctl reload ssh               # no SSH logins as academy
-sudo passwd -l academy                  # no password logins at all
-sudo -iu academy                        # become academy (asks for YOUR password)
-```
-
-### 9.2 Get the project onto the Spark and build
-As `academy`, either clone the repository (needs read access to it from the Spark), or copy it from your
-PC through your admin account (`academy` can't receive SSH):
-```bash
-# option A, on the Spark as academy
-git clone <repository URL> ~/SO101
-
-# option B, from the PC folder, then move it on the Spark
-rsync -av --exclude data --exclude .venv --exclude outputs --exclude snapshots --exclude 'logs' \
-  ./ <admin>@<SPARK_HOST>:~/SO101/
-#   on the Spark, as <admin>:
-sudo cp -r ~/SO101 /home/academy/ && sudo chown -R academy:academy /home/academy/SO101 && rm -rf ~/SO101
-```
-Then, as `academy`:
-```bash
-cd ~/SO101
-cp .env.example .env                    # set HF_USER / HF_TOKEN (a read token is enough here)
-docker compose -f compose.spark.yml build                               # ~7 GB image, once
-docker compose -f compose.spark.yml --profile tools run --rm shell scripts/00_check.sh
-# expect: CUDA: NVIDIA GB10 … and "GPU matmul ok"
-```
-The `.env` on the Spark only matters for `POLICY_SERVER_PORT` (keep it **8090**) and the HF token: the
-policy itself is chosen by each robot client (§10). DGX OS ships with Docker and the NVIDIA Container
-Toolkit.
-
-**Always run the Spark commands as `academy`, from `/home/academy/SO101`.** Docker Compose names the
-project after the folder (`so101`), so running `docker compose … up` from another user's copy of the
-folder would replace academy's policy server with one using *that* copy's files and `.env`.
-
-### 9.3 Choose a pretrained policy
 The default in `.env.example` is
 [`BoyuZhao/so101-act-pick-and-place`](https://huggingface.co/BoyuZhao/so101-act-pick-and-place): ACT, cameras
 `front` + `wrist` at 640×480, 40 demonstrations, joints in degrees (its author doesn't state the unit; its
@@ -381,16 +341,9 @@ sensitive policies are to setup changes.
 
 ## 10. Inference: policy server (Spark) + robot client (PC)
 
-**On the Spark** (admin only; already running at the Academy), as `academy` in `~/SO101`, start the
-server. It stays up and restarts by itself after a crash or a reboot:
-```bash
-docker compose -f compose.spark.yml up -d policy-server     # start in the background
-docker compose -f compose.spark.yml logs -f policy-server   # watch it; Ctrl+C stops watching, not the server
-```
-Healthy: the log shows `--port=8090` and then waits quietly for a client. The server loads **no policy**
-by itself.
+The policy server is always running on the Spark; it loads **no policy** until a client asks for one.
 
-**On the PC** (camera server running), these `.env` values must match the Spark and the policy. They're
+On the PC (camera server running), these `.env` values must match the Spark and the policy. They're
 the defaults in `.env.example`:
 ```bash
 SPARK_HOST=<the Spark's IP>                    # the Academy's is already in .env.example
@@ -436,7 +389,7 @@ Tuning:
 | Arm hesitates / goes back to earlier positions | check `DEBUG_QUEUE=1` for big `max_jump`; try `AGGREGATE_FN=average` or `conservative`. Usually the policy is outside its training scene: rebuild its scene, or record your own data and fine-tune |
 | Gripper turns sideways / wrong rotation at start | `wrist_roll` zero differs from the policy's: recalibrate (§5.2) |
 | Arm jumps to a pose when inference starts | the first chunk starts from the policy's training start pose. Move the arm close to that pose before starting |
-| Connection refused | server running? `SPARK_HOST`/`POLICY_SERVER_PORT` right? Test with `nc -z <SPARK_HOST> 8090`. Refused right after a previous session: the server is restarting, wait a few seconds and retry. Firewall: `sudo ufw allow 8090/tcp` on the Spark |
+| Connection refused | `SPARK_HOST`/`POLICY_SERVER_PORT` right? Test with `nc -z <SPARK_HOST> 8090`. Refused right after a previous session: the server is restarting, wait a few seconds and retry. Still refused: ask the Spark's admin to check the policy server ([SPARK_ADMIN.md](SPARK_ADMIN.md)) |
 
 A wired Ethernet connection (PC and Spark on the same router or switch) makes new chunks arrive sooner
 than over Wi-Fi. Check which link the PC actually uses with `route get <SPARK_HOST> | grep interface`
@@ -466,10 +419,7 @@ for this on a laptop.
 | Episodes shorter than your session | `EPISODE_TIME_S` cuts the recording into episodes (§8) |
 | Recording keys don't work (macOS) | grant Accessibility / Input Monitoring to your terminal; keep the terminal focused |
 | torchcodec `libnppicc.so.13` / `libnvrtc` errors in a custom image | aarch64 torchcodec is a CUDA build: install `nvidia-npp==13.0.*` and set `LD_LIBRARY_PATH` as in the Dockerfiles |
-| Policy server keeps `Restarting`, log says `Address already in use` | another program uses the port. Find it with `sudo ss -ltnp \| grep :<port>` (on a shared machine, 8080 is often taken). Change `POLICY_SERVER_PORT` in the **Spark's** `/home/academy/SO101/.env`, then `docker compose -f compose.spark.yml restart policy-server`, and use the same port on every PC |
 | `Couldn't find a choice class for 'zmq'` | you ran LeRobot's robot client directly; use `scripts/11_robot_client.sh` (§10) |
-| `adduser: Please enter a username matching …` | Linux usernames must be lowercase: `academy`, not `ACADEMY` |
-| `sudo: a terminal is required to read the password` during `rsync --rsync-path="sudo …"` | copy to your own home first, then `sudo cp` as in §9.2 |
 
 ---
 
@@ -493,11 +443,11 @@ Tested on the real setup (MacBook Air on Wi-Fi + Academy DGX Spark, `academy` us
 
 Not yet verified by someone following this guide from scratch: the PC setup (§4) on a fresh machine
 (on Linux, only the Docker path of Appendix A has been tried with real arms and cameras), and the Spark
-setup (§9.1–9.2) by a new user.
+setup ([SPARK_ADMIN.md](SPARK_ADMIN.md)) by a new admin.
 
 ---
 
-## Appendix A: Linux PC with Docker (optional)
+## Appendix A: Linux PC with Docker
 
 Instead of the `.venv`, a Linux PC can run the PC side in containers (`compose.pc.yml`). It gives the same
 results with more steps; the main guide doesn't need it. Not possible on macOS (see §1).
@@ -522,7 +472,7 @@ docker compose -f compose.pc.yml --profile robot run --rm robot scripts/03_calib
 
 The camera server has its **own service**, `camera-server`, the only container that gets the cameras
 (`/dev/video${CAM1_DEVICE}`, `/dev/video${CAM2_DEVICE}`). Don't run `05_camera_server.sh` in the `robot`
-container: it has no cameras and fails with `can't open camera by index`.
+container: it has no cameras and fails with `can't open camera by index`. Instead, run the following in the terminal.
 ```bash
 docker compose -f compose.pc.yml up -d camera-server        # runs in the background, restarts by itself
 docker compose -f compose.pc.yml logs -f camera-server      # wait for "capture rates: front=30.0fps wrist=30.0fps"; Ctrl+C stops watching
