@@ -18,6 +18,12 @@ COMMON=(
 )
 case "$POLICY_TYPE" in
   smolvla) run lerobot-train --policy.path=lerobot/smolvla_base "${COMMON[@]}" ;;  # fine-tune the VLA
-  act)     run lerobot-train --policy.type=act "${COMMON[@]}" ;;                 # train from scratch
+  act)
+    if [[ -n "${BASE_POLICY:-}" ]]; then
+      # Fine-tune: start from BASE_POLICY's weights; normalisation stats come from YOUR dataset.
+      run lerobot-train --policy.path="$BASE_POLICY" "${COMMON[@]}"
+    else
+      run lerobot-train --policy.type=act "${COMMON[@]}"                          # train from scratch
+    fi ;;
   *) echo "POLICY_TYPE must be act or smolvla" >&2; exit 2 ;;
 esac
