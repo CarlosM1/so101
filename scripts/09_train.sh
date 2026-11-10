@@ -12,7 +12,7 @@ COMMON=(
   --dataset.repo_id="$DATASET_REPO_ID"
   --output_dir="$OUT" --job_name="$POLICY_NAME"
   --policy.device=cuda
-  --policy.repo_id="$HF_USER/$POLICY_NAME"
+  --policy.repo_id="$HF_USER/$POLICY_NAME" --policy.push_to_hub=true   # explicit: a --policy.path config may say false
   --steps="$TRAIN_STEPS" --batch_size="$BATCH_SIZE"
   --save_freq=5000
 )
