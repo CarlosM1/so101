@@ -59,16 +59,20 @@ ACT policy can also run on the Mac itself, with no Spark (§10).
 machine often already use).
 Students never log in to the Spark: they only run the robot client on their own PC.
 
-### One guide for macOS and Linux
+### macOS runs natively, Linux runs in Docker
 
-On the PC, **macOS and Linux follow the same steps**: the project runs natively in a Python virtual
-environment (`.venv`, created by `scripts/setup_native.sh`) with pinned package versions, and you run the
-same `scripts/` with the same `.env`. Only the installation (§4), the port names (§5.1) and the camera
-numbers (§6) differ, and those places say so. Docker is used **only on the Spark**.
+| Your PC is… | PC side runs | Spark side runs |
+|---|---|---|
+| **macOS** | **natively**, in a Python virtual environment (`.venv`, `scripts/setup_native.sh`) | Docker |
+| **Linux** | **in Docker** (`compose.pc.yml`) | Docker |
 
-(A Linux PC *can* also run the PC side in Docker, see [Appendix A](#appendix-a-linux-pc-with-docker).
-It adds extra steps, but it will always work. On macOS it isn't possible at all: Docker Desktop runs containers in a
-VM that can't see the Mac's USB arms and cameras.)
+Why the difference: Docker Desktop on macOS runs containers in a VM that can't see the Mac's USB arms and
+cameras, so the Mac has to run natively. On Linux, Docker gives every PC exactly the same environment,
+whatever the distribution or Python version.
+
+Both use the same `scripts/` and the same `.env`. The steps below show each command as you type it on
+macOS; on Linux you run the same script through the container (`so101 scripts/…`, set up in §4). Only
+the setup (§4), finding the ports (§5.1) and the camera server (§6) differ, and those places say so.
 
 ---
 
@@ -78,10 +82,10 @@ VM that can't see the Mac's USB arms and cameras.)
 .env.example            ← all configuration (ports, IDs, cameras, task, Spark IP). Copy to .env
 requirements/pc.txt     ← PC packages:    lerobot[feetech,core_scripts,async,pyzmq-dep]
 requirements/spark.txt  ← Spark packages: lerobot[training,smolvla,async] (policy server)
-docker/pc.Dockerfile    ← optional PC image (Linux only, Appendix A)
+docker/pc.Dockerfile    ← PC image (Linux PCs)
 docker/spark.Dockerfile ← Spark image (aarch64 + CUDA 13)
 docker/udev/            ← Linux: stable /dev/so101_follower, /dev/so101_leader names
-compose.pc.yml          ← optional camera-server + robot services (Linux only, Appendix A)
+compose.pc.yml          ← camera-server + robot services (Linux PCs)
 compose.spark.yml       ← policy-server service (Spark); the train service is unused
 camera_server/serve.py  ← the camera server
 camera_server/snapshot.py ← "what does LeRobot see?" check
@@ -127,30 +131,72 @@ Where things are stored (set by `HF_LEROBOT_HOME` in `.env`):
 
 ## 4. PC setup
 
-Install the tools for your system, then create the environment (same commands on both).
-
-**macOS:**
+### 4.1 macOS (native)
 ```bash
 brew install uv ffmpeg@8
+scripts/setup_native.sh        # creates .venv with Python 3.12 + requirements/pc.txt
+scripts/00_check.sh            # prints config and versions, "Apple MPS available"
 ```
+Scripts activate `.venv` themselves. To use the LeRobot CLI by hand: `source .venv/bin/activate`.
 macOS will ask for **camera** permission for your terminal, and for **Accessibility/Input Monitoring**
 (keyboard shortcuts while recording). Grant both in System Settings → Privacy & Security.
 
-**Linux** (Ubuntu/Debian):
+### 4.2 Linux (Docker)
+**1. Install Docker** Engine with the Compose plugin ([docs.docker.com/engine/install](https://docs.docker.com/engine/install/)),
+and let your user run it:
 ```bash
-sudo apt install ffmpeg build-essential linux-libc-dev v4l-utils   # ffmpeg 4–8; a C compiler builds evdev (recording keys)
-curl -LsSf https://astral.sh/uv/install.sh | sh                    # installs uv, then open a new terminal
-sudo usermod -aG dialout $USER                                     # access to the arms' serial ports
+sudo usermod -aG docker $USER      # then log out and in again
+sudo apt install v4l-utils         # for v4l2-ctl (listing cameras)
 ```
-Log out and in again (or reboot) so the `dialout` group takes effect.
 
-**Both:**
+**2. Find the arm ports on the host** (not in a container). Plug in both arms (USB and power):
 ```bash
-scripts/setup_native.sh        # creates .venv with Python 3.12 + requirements/pc.txt
-scripts/00_check.sh            # prints config and versions; macOS: "Apple MPS available", Linux: "CPU only" (or CUDA)
+ls -l /dev/serial/by-id/
+# usb-1a86_USB_Single_Serial_5A7C121717-if00 -> ../../ttyACM0
+# usb-1a86_USB_Single_Serial_5AB0158676-if00 -> ../../ttyACM1
 ```
-Scripts activate `.venv` themselves. To use the LeRobot CLI by hand: `source .venv/bin/activate`.
-On Linux, PyPI's torch is a CUDA build (a few GB to download); it runs fine on a PC without a GPU.
+Unplug one arm's USB cable and list again: the entry that disappears is that arm. Put the **full** paths in
+`.env` (they don't change on reboot or re-plug, unlike `ttyACM0`/`ttyACM1`):
+```
+FOLLOWER_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7C121717-if00
+LEADER_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5AB0158676-if00
+```
+The follower is the arm with a gripper; the leader is the arm with the handle.
+
+**3. Find the cameras on the host:**
+```bash
+v4l2-ctl --list-devices
+# FHD Camera (usb-…):   /dev/video0 /dev/video1 /dev/video2 /dev/video3
+# USB2.0_CAM1 (usb-…):  /dev/video4 /dev/video5
+```
+Many USB cameras create several `/dev/video*` nodes; only the **first** of each camera gives images. Here
+the cameras are `0` and `4` (not `0` and `1`). Put them in `.env`: `CAM1_DEVICE` = front/top camera,
+`CAM2_DEVICE` = wrist camera. §6 shows how to check you got them the right way round.
+
+**4. Build and check:**
+```bash
+docker compose -f compose.pc.yml build
+docker compose -f compose.pc.yml --profile robot run --rm robot scripts/00_check.sh
+```
+Docker only starts the `robot` container when the ports in `.env` exist, so do steps 2–3 first.
+
+**5. A shortcut for every other command.** Each script runs inside the `robot` container. Define a short
+name for that, in the project folder:
+```bash
+alias so101='docker compose -f compose.pc.yml --profile robot run --rm robot'
+echo "alias so101='docker compose -f compose.pc.yml --profile robot run --rm robot'" >> ~/.bashrc   # keep it for new terminals
+```
+Then, wherever this guide says `scripts/03_calibrate.sh follower`, type `so101 scripts/03_calibrate.sh follower`.
+Run it from the project folder. Two exceptions:
+- skip `01_find_port.sh` and `04_find_cameras.sh` (done in steps 2–3; they can't see new devices from
+  inside a container);
+- the camera server runs as its own service, not through `so101` (§6).
+
+Good to know:
+- The containers run as root, so files they create in `data/` (calibration, datasets) and `logs/` are owned
+  by root. Everything works, but moving or deleting them needs `sudo` (or `sudo chown -R $USER: data logs`).
+- The rerun viewer (`DISPLAY_DATA`) is off in containers.
+- After changing `FOLLOWER_PORT`/`LEADER_PORT` in `.env`, the next `so101 …` command uses them automatically.
 
 ---
 
@@ -158,23 +204,19 @@ On Linux, PyPI's torch is a CUDA build (a few GB to download); it runs fine on a
 
 The arms come with their motor IDs already set, so there's no motor setup to do.
 
-**5.1 Find the ports.** Plug in both arms (USB and power). Run once per arm; it asks you to unplug its
-USB cable:
+**5.1 Find the ports.** Linux: already done in §4.2. On macOS, plug in both arms (USB and power) and run
+once per arm; it asks you to unplug its USB cable:
 ```bash
-scripts/01_find_port.sh          # macOS → e.g. /dev/tty.usbmodem585A0076841   Linux → e.g. /dev/ttyACM0
+scripts/01_find_port.sh          # → e.g. /dev/tty.usbmodem585A0076841
 ```
 Put the results into `FOLLOWER_PORT` / `LEADER_PORT` in `.env`. The follower is the arm with a gripper. The leader is the arm with the handle.
-
-On Linux, `ttyACM0`/`ttyACM1` can swap after a reboot or re-plug. Check with `ls -l /dev/serial/by-id/`
-(one entry per arm, pointing to its `ttyACM*`), or give the arms fixed names once by following
-`docker/udev/99-so101.rules` and setting `FOLLOWER_PORT=/dev/so101_follower`, `LEADER_PORT=/dev/so101_leader`.
 
 **5.2 Calibrate.** Move every joint to the middle of its range, press Enter, then sweep each joint through
 its full range. Calibration maps raw encoder ticks to the same joint positions on both arms. That shared
 mapping is what makes the follower mirror the leader, and what makes your data reusable.
 ```bash
-scripts/03_calibrate.sh follower
-scripts/03_calibrate.sh leader
+scripts/03_calibrate.sh follower       # Linux: so101 scripts/03_calibrate.sh follower
+scripts/03_calibrate.sh leader         # Linux: so101 scripts/03_calibrate.sh leader
 ```
 The calibration file is named after the **ID** (`FOLLOWER_ID`, `LEADER_ID`). Never change the IDs
 afterwards: a new ID means a new, missing calibration.
@@ -195,28 +237,37 @@ recorded with; the default ACT policy uses degrees.
 
 ## 6. Cameras: find → serve → check
 
+**Find them.** Linux: already done in §4.2. On macOS:
 ```bash
 scripts/04_find_cameras.sh       # lists OpenCV indices, saves a test image per camera to outputs/captured_images
 ```
 Look at the images and each camera ID in the terminal, then set `CAM1_DEVICE` to the ID of the front/top
-camera and `CAM2_DEVICE` to the ID of the wrist camera in `.env`. On a laptop, the built-in webcam also
+camera and `CAM2_DEVICE` to the ID of the wrist camera in `.env`. On a MacBook, the built-in webcam also
 gets an ID (often 0 or 1). Make sure you don't pick it by mistake.
 Indices can change when you re-plug cameras, so check again if the views look swapped.
 
-On Linux the ID is the number of `/dev/video<N>`, and many USB cameras create **two or more** of them;
-only the first one of each camera gives images. `v4l2-ctl --list-devices` shows them grouped per camera,
-e.g. `FHD Camera: /dev/video0 /dev/video1 …` and `USB2.0_CAM1: /dev/video4 /dev/video5`, so here the
-IDs are `0` and `4` (not `0` and `1`).
+**Start the server** and leave it running during teleop, recording and inference.
 
-Start the server in its **own terminal** and leave it running:
+macOS, in its **own terminal**:
 ```bash
 scripts/05_camera_server.sh      # logs "capture rates: <CAM1_NAME>=30.0fps <CAM2_NAME>=30.0fps" every 5 s
 ```
 Restart it (Ctrl+C, then run it again) after changing `CAM*_DEVICE` or other camera settings in `.env`.
 
-Check what LeRobot will actually receive (in another terminal):
+Linux: the camera server is its **own service**, `camera-server`, the only container that gets the
+cameras. Don't run `05_camera_server.sh` through `so101`: the `robot` container has no cameras and fails
+with `can't open camera by index`.
+```bash
+docker compose -f compose.pc.yml up -d camera-server        # runs in the background, restarts by itself
+docker compose -f compose.pc.yml logs -f camera-server      # wait for "capture rates: front=30.0fps wrist=30.0fps"; Ctrl+C stops watching
+docker compose -f compose.pc.yml up -d camera-server        # run again after changing CAM*_DEVICE or other camera settings in .env
+docker compose -f compose.pc.yml stop camera-server         # stop it
+```
+
+**Check** what LeRobot will actually receive (macOS: in another terminal):
 ```bash
 scripts/05b_camera_snapshot.sh   # writes snapshots/<CAM1_NAME>.jpg and snapshots/<CAM2_NAME>.jpg
+                                 # Linux: so101 scripts/05b_camera_snapshot.sh
 ```
 If the two views are swapped, swap `CAM1_DEVICE` and `CAM2_DEVICE` in `.env` and restart the server.
 No cameras yet? Test the whole pipeline with synthetic ones:
@@ -228,8 +279,8 @@ Things to know:
 - If a camera's rate in the server log is below `CAMERA_FPS`, recording will drop frames. Use more light
   (auto-exposure lowers the fps in the dark), a lower resolution, or separate USB ports.
 - Debugging without the server: set `CAMERA_MODE=opencv` and scripts open the cameras directly.
-- `ZMQCamera … timeout` means nothing is publishing: the camera server isn't running (it must stay up in
-  its own terminal during teleop, recording and inference).
+- `ZMQCamera … timeout` means nothing is publishing: the camera server isn't running (macOS: it must stay
+  up in its own terminal; Linux: `docker compose -f compose.pc.yml ps` should list `camera-server`).
 
 ---
 
@@ -448,7 +499,7 @@ than over Wi-Fi. Check which link the PC actually uses with `route get <SPARK_HO
 a hand on the follower's power supply. Ctrl+C stops the client; torque is released on disconnect.
 
 **Optional: run without the Spark.** For a small policy such as ACT on the PC:
-`scripts/12_rollout_local.sh mps` (`cpu` on a Linux PC without a GPU; uses `lerobot-rollout`, all on the PC, 60 s per run). VLAs are too slow
+`scripts/12_rollout_local.sh mps` (Linux: `so101 scripts/12_rollout_local.sh cpu`; uses `lerobot-rollout`, all on the PC, 60 s per run). VLAs are too slow
 for this on a laptop.
 
 ---
@@ -457,7 +508,9 @@ for this on a laptop.
 
 | Problem | Cause / fix |
 |---|---|
-| `Permission denied: /dev/ttyACM0` (Linux) | `sudo usermod -aG dialout $USER` and re-login, or the udev rule's `MODE="0666"` |
+| `error gathering device information while adding custom device` (Linux) | a port in `.env` doesn't exist: arm unplugged, or a wrong `FOLLOWER_PORT`/`LEADER_PORT`. Check with `ls -l /dev/serial/by-id/` (§4.2) |
+| `can't open camera by index` (Linux) | the camera server was started in the `robot` container; use the `camera-server` service (§6), and check `CAM*_DEVICE` with `v4l2-ctl --list-devices` |
+| `permission denied … docker.sock` (Linux) | `sudo usermod -aG docker $USER`, then log out and in again |
 | Motor not found / wrong ID | loose daisy-chain cable, or the arm's power supply is off |
 | Follower moves differently from leader | re-calibrate both; check `FOLLOWER_ID`/`LEADER_ID` didn't change |
 | `ZMQCamera … timeout` | camera server not running, or wrong `CAMERA_SERVER_HOST`/ports |
@@ -493,48 +546,10 @@ Tested on the real setup (MacBook Air on Wi-Fi + Academy DGX Spark, `academy` us
 - The pretrained policy makes progress on the task but isn't reliable in our scene (it goes back to
   earlier positions): next step is collecting our own data and fine-tuning on it.
 
-Not yet verified by someone following this guide from scratch: the PC setup (§4) on a fresh machine
-(on Linux, only the Docker path of Appendix A has been tried with real arms and cameras), and the Spark
-setup (§9.1–9.2) by a new user.
+Linux PC (Docker, §4.2): tried by a colleague with real arms and cameras (ports, camera server).
 
----
-
-## Appendix A: Linux PC with Docker
-
-Instead of the `.venv`, a Linux PC can run the PC side in containers (`compose.pc.yml`). It gives the same
-results with more steps; the main guide doesn't need it. Not possible on macOS (see §1).
-
-Install Docker Engine with the Compose plugin and let your user run it: `sudo usermod -aG docker $USER`,
-then log out and in again.
-
-**Find the ports and cameras on the host first** (§5.1 with `ls -l /dev/serial/by-id/`, §6 with
-`v4l2-ctl --list-devices`) and put them in `.env`. The `robot` container is started with those devices
-passed in: Docker refuses to start it while they don't exist (the defaults in `.env.example` are macOS
-placeholders), and `01_find_port.sh` / `04_find_cameras.sh` can't discover anything from inside it.
-
-```bash
-docker compose -f compose.pc.yml build
-docker compose -f compose.pc.yml --profile robot run --rm robot scripts/00_check.sh
-```
-
-Every other script runs the same way, with the prefix:
-```bash
-docker compose -f compose.pc.yml --profile robot run --rm robot scripts/03_calibrate.sh follower
-```
-
-The camera server has its **own service**, `camera-server`, the only container that gets the cameras
-(`/dev/video${CAM1_DEVICE}`, `/dev/video${CAM2_DEVICE}`). Don't run `05_camera_server.sh` in the `robot`
-container: it has no cameras and fails with `can't open camera by index`. Instead, run the following in the terminal.
-```bash
-docker compose -f compose.pc.yml up -d camera-server        # runs in the background, restarts by itself
-docker compose -f compose.pc.yml logs -f camera-server      # wait for "capture rates: front=30.0fps wrist=30.0fps"; Ctrl+C stops watching
-docker compose -f compose.pc.yml up -d camera-server        # run again after changing CAM*_DEVICE or other camera settings in .env
-docker compose -f compose.pc.yml stop camera-server         # stop it
-```
-
-The containers run as root, so files they create in `data/` (calibration, datasets) and `logs/` are owned
-by root on the host. Everything works, but moving or deleting them needs `sudo`
-(or `sudo chown -R $USER: data logs`). The rerun viewer (`DISPLAY_DATA`) is off in containers.
+Not yet verified by someone following this guide from scratch: the PC setup (§4) on a fresh machine, and
+the Spark setup (§9.1–9.2) by a new user.
 
 ---
 

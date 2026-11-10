@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PC setup on macOS and Linux (the README path): same packages as docker/pc.Dockerfile,
+# PC setup on macOS (Linux PCs use Docker, README §4.2): same packages as docker/pc.Dockerfile,
 # installed in ./.venv. On macOS the default PyPI torch includes Apple MPS support.
 set -euo pipefail
 cd "$(dirname "$0")/.."
