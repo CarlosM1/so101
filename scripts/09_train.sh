@@ -2,6 +2,7 @@
 # Step 9 (SPARK) — Train a policy on the recorded dataset (pulled from the Hub automatically).
 #   usage: scripts/09_train.sh            start
 #          scripts/09_train.sh --resume   continue from the last checkpoint
+#          scripts/09_train.sh --dataset.image_transforms.enable=true   extra lerobot-train options are passed on
 source "$(dirname "$0")/lib.sh"
 OUT="$PROJECT_ROOT/outputs/train/$POLICY_NAME"
 if [[ "${1:-}" == "--resume" ]]; then
@@ -15,6 +16,7 @@ COMMON=(
   --policy.repo_id="$HF_USER/$POLICY_NAME" --policy.push_to_hub=true   # explicit: a --policy.path config may say false
   --steps="$TRAIN_STEPS" --batch_size="$BATCH_SIZE"
   --save_freq=5000
+  "$@"
 )
 case "$POLICY_TYPE" in
   smolvla) run lerobot-train --policy.path=lerobot/smolvla_base "${COMMON[@]}" ;;  # fine-tune the VLA
