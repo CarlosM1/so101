@@ -16,6 +16,44 @@ Hub** on the real arm. For now, Training is out of scope. The work is split acro
 
 Everything is pinned to **LeRobot 0.6.1** (PyPI) with **torch 2.11**, Python 3.12.
 
+
+## Table of contents
+
+- [1. The architecture, and why it looks like this](#1-the-architecture-and-why-it-looks-like-this)
+- [2. Project layout](#2-project-layout)
+- [3. Before you start](#3-before-you-start)
+- [4. PC setup](#4-pc-setup)
+- [5. Arms: ports → calibration](#5-arms-ports--calibration)
+- [6. Cameras: find → serve → check](#6-cameras-find--serve--check)
+- [7. Teleoperation](#7-teleoperation)
+- [8. Data collection](#8-data-collection)
+- [9. Spark setup and choosing a pretrained policy](#9-spark-setup-and-choosing-a-pretrained-policy)
+- [10. Inference: policy server (Spark) + robot client (PC)](#10-inference-policy-server-spark--robot-client-pc)
+- [11. Troubleshooting](#11-troubleshooting)
+- [12. What has been verified](#12-what-has-been-verified)
+- [License](#license)
+
+### Script order at a glance
+
+Follow these PC scripts in order for a complete setup and run. Complete the Spark setup in §9 first
+if the Academy Spark has not already been prepared. Keep `05_camera_server.sh` running in its own
+terminal while doing camera checks, teleoperation, recording, and inference.
+
+1. `scripts/setup_native.sh` — create the PC Python environment.
+2. `scripts/00_check.sh` — verify configuration and package versions.
+3. `scripts/01_find_port.sh` — identify the arm ports; update `.env`.
+4. `scripts/03_calibrate.sh follower`, then `scripts/03_calibrate.sh leader` — calibrate both arms.
+5. `scripts/04_find_cameras.sh` — identify camera indices; update `.env`.
+6. `scripts/05_camera_server.sh` — start the camera server; leave it running.
+7. `scripts/05b_camera_snapshot.sh` — verify the camera views.
+8. `scripts/06_teleoperate.sh` — verify leader/follower motion and practise the task.
+9. `scripts/07_record.sh` — record demonstrations; optionally use `--resume` to add episodes.
+10. `scripts/08_replay.sh 0` — check a recorded episode (substitute another episode index as needed).
+11. Start the Spark policy server as described in §10, then run `scripts/11_robot_client.sh` on the PC.
+
+`scripts/12_rollout_local.sh mps` is an optional local-inference alternative for a small policy; use
+`cpu` instead of `mps` on a Linux PC without a GPU. The optional Docker PC setup is described in Appendix A.
+
 ---
 
 ## 1. The architecture, and why it looks like this
@@ -92,6 +130,7 @@ camera_server/snapshot.py ← "what does LeRobot see?" check
 scripts/                ← one script per step, numbered in order. Each prints the real
                           lerobot command before running it, so you learn the CLI.
 scripts/robot_client.py ← launcher for LeRobot's async robot client, with two fixes (§10)
+scripts/motor_ids.py    ← check (and repair) an assembled arm's motor IDs (§5)
 data/                   ← (created) calibration files + datasets + HF cache. Back it up!
 logs/                   ← (created) LeRobot debug logs, in the folder you ran the script from; not committed
 ```
@@ -105,9 +144,11 @@ Where things are stored (set by `HF_LEROBOT_HOME` in `.env`):
 
 ## 3. Before you start
 
-1. **Assemble both arms** following the [SO101 guide](https://huggingface.co/docs/lerobot/main/en/so101).
+1. **Assemble both arms**, if for some reason your SO101 arms do not have the motors setup, are unassembled or are uncalibrated, use the following [SO101 guide](https://huggingface.co/docs/lerobot/main/en/so101).
    The leader uses motors with mixed gear ratios (1/191, 1/345, 1/147); the follower uses six 1/345.
    Don't mix them up.
+
+   **WARNING**: VERY IMPORTANT, do not mix the 12V transformer with the 5V transformer that will connect to each arms circuit board. The 12V transformer is for the follower (gripper) arm and the 5V is for the leader.
 2. **Hugging Face account and token** with *write* access: https://huggingface.co/settings/tokens.
    Recorded datasets are uploaded to the Hub, and the Spark downloads the pretrained policy from it.
    `HF_USER` must be your exact Hub username (see your profile URL).
@@ -202,7 +243,20 @@ Good to know:
 
 ## 5. Arms: ports → calibration
 
-The arms come with their motor IDs already set, so there's no motor setup to do.
+The arms come with their motor IDs already set, so there's no motor setup to do. The IDs are stored in the
+motors themselves, so they work on any computer (macOS or Linux, with or without Docker).
+
+**Never run `02_setup_motors.sh` on an assembled arm.** It's only for new motors, one at a time. With
+the whole arm connected, it gives several motors the same ID, and those motors then seem to disappear.
+To check an arm instead (a few seconds, changes nothing):
+```bash
+python scripts/motor_ids.py scan <FOLLOWER_PORT>      # Linux: so101 python scripts/motor_ids.py scan <FOLLOWER_PORT>
+# healthy:  answering at 1000000 baud: [1, 2, 3, 4, 5, 6]   (all 6 OK)
+```
+If IDs are missing, first check the arm's power supply and the cables between the motors. If all six are
+missing, it's almost always power. The docstring at the top of `scripts/motor_ids.py` describes how to repair
+duplicate IDs.
+
 
 **5.1 Find the ports.** Linux: already done in §4.2. On macOS, plug in both arms (USB and power) and run
 once per arm; it asks you to unplug its USB cable:
