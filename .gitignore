@@ -232,3 +232,5 @@ snapshots/
 logs/
 __pycache__/
 .DS_Store
+# private training guide (kept on this computer only)
+TRAINING.md

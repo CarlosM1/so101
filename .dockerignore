@@ -7,3 +7,4 @@ snapshots
 logs
 **/logs
 **/__pycache__
+TRAINING.md
